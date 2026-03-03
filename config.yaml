@@ -1,28 +1,16 @@
 # Binance API Configuration
-# 可以配置两组 API
 
 binance:
-  # 第一组 API (API1)
   api1:
     api_key: ""
     api_secret: ""
   
-  # 第二组 API (API2)
   api2:
     api_key: ""
     api_secret: ""
 
-# 返佣配置
 rebate:
-  # 返佣比例 (0.4 = 40%)
   rebate_rate: 0.4
-  
-  # 分成比例 (0.3 = 30% of rebate)
   share_rate: 0.3
 
-# 交易对
 symbol: "ICPUSDT"
-
-# 时间范围 (可选，默认使用命令行参数)
-start_time: ""
-end_time: ""

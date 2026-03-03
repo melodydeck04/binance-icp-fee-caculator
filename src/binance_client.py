@@ -1,12 +1,8 @@
-"""Binance API Client"""
-import hmac
-import hashlib
-import time
+"""Binance API Client using python-binance"""
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
-import requests
-from urllib.parse import urlencode
+from binance.client import Client
 
 logger = logging.getLogger(__name__)
 
@@ -14,79 +10,16 @@ logger = logging.getLogger(__name__)
 class BinanceClient:
     """Binance API Client"""
     
-    BASE_URL = "https://api.binance.com"
-    
     def __init__(self, api_key: str = None, api_secret: str = None):
         self.api_key = api_key
         self.api_secret = api_secret
-        self.session = requests.Session()
-        self.session.headers.update({
-            "X-MBX-APIKEY": api_key or "",
-            "Content-Type": "application/x-www-form-urlencoded"
-        })
-    
-    def _sign(self, params: str) -> str:
-        """Generate signature"""
-        if not self.api_secret:
-            return ""
-        return hmac.new(
-            self.api_secret.encode('utf-8'),
-            params.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-    
-    def _request(self, method: str, endpoint: str, params: Dict = None, signed: bool = False) -> Dict:
-        """Send request to Binance API"""
-        url = f"{self.BASE_URL}{endpoint}"
         
-        if params is None:
-            params = {}
+        if api_key and api_secret:
+            self.client = Client(api_key, api_secret)
+        else:
+            self.client = None
         
-        # 添加时间戳
-        params["timestamp"] = int(time.time() * 1000)
-        
-        # 签名
-        if signed and self.api_secret:
-            query_string = urlencode(params)
-            params["signature"] = self._sign(query_string)
-        
-        try:
-            if method == "GET":
-                response = self.session.get(url, params=params, timeout=30)
-            elif method == "POST":
-                response = self.session.post(url, data=params, timeout=30)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
-            
-            response.raise_for_status()
-            return response.json()
-        
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            raise
-    
-    def _signed_request(self, endpoint: str, params: Dict = None) -> Dict:
-        """发送需要签名的请求"""
-        if params is None:
-            params = {}
-        
-        # 添加时间戳和recvWindow
-        params["timestamp"] = int(time.time() * 1000)
-        params["recvWindow"] = 60000  # 60秒
-        
-        # 签名
-        query_string = urlencode(params)
-        params["signature"] = self._sign(query_string)
-        
-        url = f"{self.BASE_URL}{endpoint}"
-        
-        try:
-            response = self.session.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            raise
+        logger.info(f"BinanceClient initialized")
     
     def get_all_trades(
         self,
@@ -107,40 +40,42 @@ class BinanceClient:
         Returns:
             成交列表
         """
-        all_trades = []
+        if not self.client:
+            raise ValueError("API key and secret required")
         
-        current_start = start_time
+        all_trades = []
         
         # 递归获取所有数据
         while True:
-            params = {
-                "symbol": symbol.upper(),
-                "limit": limit
-            }
-            
-            if current_start:
-                params["startTime"] = current_start
-            
-            if end_time:
-                params["endTime"] = end_time
-            
-            # 使用专用签名请求
-            data = self._signed_request("/api/v3/myTrades", params)
-            
-            if not data or isinstance(data, dict):
-                # 如果返回错误
-                if isinstance(data, dict) and data.get("code"):
-                    logger.error(f"Binance API error: {data}")
+            try:
+                params = {
+                    "symbol": symbol.upper(),
+                    "limit": limit
+                }
+                
+                if start_time:
+                    params["startTime"] = start_time
+                
+                if end_time:
+                    params["endTime"] = end_time
+                
+                data = self.client.get_my_trades(**params)
+                
+                if not data:
+                    break
+                
+                all_trades.extend(data)
+                
+                # 如果返回数量小于 limit，说明已经获取完毕
+                if len(data) < limit:
+                    break
+                
+                # 更新 startTime 为最后一条记录的时间 + 1
+                start_time = int(data[-1]["time"]) + 1
+                
+            except Exception as e:
+                logger.error(f"Error fetching trades: {e}")
                 break
-            
-            all_trades.extend(data)
-            
-            # 如果返回数量小于 limit，说明已经获取完毕
-            if len(data) < limit:
-                break
-            
-            # 更新 startTime 为最后一条记录的时间 + 1
-            current_start = data[-1]["time"] + 1
         
         return all_trades
     
@@ -163,11 +98,10 @@ class BinanceClient:
         """
         trades = self.get_all_trades(symbol, start_time, end_time)
         
-        usdt_fees = 0.0  # USDT 手续费
-        bnb_fees = 0.0  # BNB 手续费
+        usdt_fees = 0.0
+        bnb_fees = 0.0
         
         for trade in trades:
-            # commission 字段是手续费
             commission = float(trade.get("commission", 0))
             commission_asset = trade.get("commissionAsset", "")
             
@@ -200,19 +134,17 @@ class BinanceClient:
             end_ts = int((dt + timedelta(days=1)).timestamp() * 1000)
             
             # 获取 K 线数据
-            params = {
-                "symbol": "BNBUSDT",
-                "interval": "1d",
-                "startTime": start_ts,
-                "endTime": end_ts,
-                "limit": 1
-            }
+            klines = self.client.get_klines(
+                symbol="BNBUSDT",
+                interval="1d",
+                startTime=start_ts,
+                endTime=end_ts,
+                limit=1
+            )
             
-            data = self._request("GET", "/api/v3/klines", params)
-            
-            if data and len(data) > 0:
+            if klines and len(klines) > 0:
                 # 收盘价
-                return float(data[0][4])
+                return float(klines[0][4])
             
             return None
         
