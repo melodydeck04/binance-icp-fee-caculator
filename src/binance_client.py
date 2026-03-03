@@ -6,6 +6,9 @@ from binance.client import Client
 
 logger = logging.getLogger(__name__)
 
+# 24小时 = 24 * 60 * 60 * 1000 = 86400000 ms
+MAX_RANGE_MS = 24 * 60 * 60 * 1000
+
 
 class BinanceClient:
     """Binance API Client"""
@@ -45,36 +48,49 @@ class BinanceClient:
         
         all_trades = []
         
-        # 递归获取所有数据
-        while True:
-            try:
-                params = {
-                    "symbol": symbol.upper(),
-                    "limit": limit
-                }
-                
-                if start_time:
-                    params["startTime"] = start_time
-                
-                if end_time:
-                    params["endTime"] = end_time
-                
-                data = self.client.get_my_trades(**params)
-                
-                if not data:
+        # 如果时间范围超过24小时，需要分段查询
+        current_start = start_time
+        
+        while current_start and end_time:
+            # 计算这个区间的结束时间
+            current_end = min(current_start + MAX_RANGE_MS, end_time)
+            
+            logger.info(f"Fetching trades from {datetime.fromtimestamp(current_start/1000)} to {datetime.fromtimestamp(current_end/1000)}")
+            
+            # 递归获取这个时间段的数据
+            while True:
+                try:
+                    params = {
+                        "symbol": symbol.upper(),
+                        "limit": limit
+                    }
+                    
+                    params["startTime"] = current_start
+                    params["endTime"] = current_end
+                    
+                    data = self.client.get_my_trades(**params)
+                    
+                    if not data:
+                        break
+                    
+                    all_trades.extend(data)
+                    
+                    # 如果返回数量小于 limit，说明已经获取完毕
+                    if len(data) < limit:
+                        break
+                    
+                    # 更新 startTime 为最后一条记录的时间 + 1
+                    current_start = int(data[-1]["time"]) + 1
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching trades: {e}")
                     break
-                
-                all_trades.extend(data)
-                
-                # 如果返回数量小于 limit，说明已经获取完毕
-                if len(data) < limit:
-                    break
-                
-                # 更新 startTime 为最后一条记录的时间 + 1
-                start_time = int(data[-1]["time"]) + 1
-                
-            except Exception as e:
-                logger.error(f"Error fetching trades: {e}")
+            
+            # 移动到下一个时间段
+            current_start = current_end
+            
+            # 如果已经到达结束时间，退出循环
+            if current_start >= end_time:
                 break
         
         return all_trades
@@ -118,22 +134,12 @@ class BinanceClient:
         }
     
     def get_daily_bnb_price(self, date: str) -> Optional[float]:
-        """
-        获取指定日期的 BNB 价格
-        
-        Args:
-            date: 日期 (格式: "2024-01-01")
-            
-        Returns:
-            BNB 价格 (USDT)
-        """
+        """获取指定日期的 BNB 价格"""
         try:
-            # 转换为时间戳
             dt = datetime.strptime(date, "%Y-%m-%d")
             start_ts = int(dt.timestamp() * 1000)
             end_ts = int((dt + timedelta(days=1)).timestamp() * 1000)
             
-            # 获取 K 线数据
             klines = self.client.get_klines(
                 symbol="BNBUSDT",
                 interval="1d",
@@ -143,7 +149,6 @@ class BinanceClient:
             )
             
             if klines and len(klines) > 0:
-                # 收盘价
                 return float(klines[0][4])
             
             return None
@@ -153,15 +158,7 @@ class BinanceClient:
             return None
     
     def get_bnb_prices_for_dates(self, dates: List[str]) -> Dict[str, float]:
-        """
-        获取多个日期的 BNB 价格
-        
-        Args:
-            dates: 日期列表
-            
-        Returns:
-            {日期: 价格}
-        """
+        """获取多个日期的 BNB 价格"""
         prices = {}
         
         for date in dates:
@@ -177,18 +174,7 @@ class BinanceClient:
         start_time: int,
         end_time: int
     ) -> Dict:
-        """
-        计算加权手续费
-        
-        Args:
-            symbol: 交易对
-            start_time: 开始时间
-            end_time: 结束时间
-            
-        Returns:
-            计算结果
-        """
-        # 获取所有交易
+        """计算加权手续费"""
         fee_data = self.get_trade_fees(symbol, start_time, end_time)
         
         # 收集所有交易日期
@@ -217,7 +203,6 @@ class BinanceClient:
             if date in bnb_prices:
                 bnb_fees_in_usdt += bnb_amount * bnb_prices[date]
         
-        # 总手续费 (USDT)
         total_fees_usdt = fee_data["usdt_fees"] + bnb_fees_in_usdt
         
         return {
