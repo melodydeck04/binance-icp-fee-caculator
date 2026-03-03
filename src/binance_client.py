@@ -65,6 +65,29 @@ class BinanceClient:
             logger.error(f"Request failed: {e}")
             raise
     
+    def _signed_request(self, endpoint: str, params: Dict = None) -> Dict:
+        """发送需要签名的请求"""
+        if params is None:
+            params = {}
+        
+        # 添加时间戳和recvWindow
+        params["timestamp"] = int(time.time() * 1000)
+        params["recvWindow"] = 60000  # 60秒
+        
+        # 签名
+        query_string = urlencode(params)
+        params["signature"] = self._sign(query_string)
+        
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        try:
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {e}")
+            raise
+    
     def get_all_trades(
         self,
         symbol: str,
@@ -86,22 +109,28 @@ class BinanceClient:
         """
         all_trades = []
         
-        params = {
-            "symbol": symbol.upper(),
-            "limit": limit
-        }
+        current_start = start_time
         
-        if start_time:
-            params["startTime"] = start_time
-        
-        if end_time:
-            params["endTime"] = end_time
-        
-        # 递归获取所有数据 (需要签名)
+        # 递归获取所有数据
         while True:
-            data = self._request("GET", "/api/v3/myTrades", params, signed=True)
+            params = {
+                "symbol": symbol.upper(),
+                "limit": limit
+            }
             
-            if not data:
+            if current_start:
+                params["startTime"] = current_start
+            
+            if end_time:
+                params["endTime"] = end_time
+            
+            # 使用专用签名请求
+            data = self._signed_request("/api/v3/myTrades", params)
+            
+            if not data or isinstance(data, dict):
+                # 如果返回错误
+                if isinstance(data, dict) and data.get("code"):
+                    logger.error(f"Binance API error: {data}")
                 break
             
             all_trades.extend(data)
@@ -111,7 +140,7 @@ class BinanceClient:
                 break
             
             # 更新 startTime 为最后一条记录的时间 + 1
-            params["startTime"] = data[-1]["time"] + 1
+            current_start = data[-1]["time"] + 1
         
         return all_trades
     
