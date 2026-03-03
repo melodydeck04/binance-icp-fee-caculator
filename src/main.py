@@ -91,7 +91,8 @@ def main():
     parser.add_argument("--end", required=True, help="End time (YYYY-MM-DD)")
     
     # 交易对
-    parser.add_argument("--symbol", default="ICPUSDT", help="Trading pair")
+    parser.add_argument("--symbol", default="ICPUSDT", help="Trading pair (default: ICPUSDT)")
+    parser.add_argument("--symbol-2", default="", help="Trading pair for API 2 (e.g., ICPUSDC)")
     
     # 返佣比例
     parser.add_argument("--rebate-rate", type=float, default=0.4, help="Rebate rate (default: 0.4)")
@@ -123,7 +124,9 @@ def main():
     rebate_rate = args.rebate_rate
     share_rate = args.share_rate
     
-    symbol = args.symbol
+    # 交易对 (支持不同交易对)
+    symbol1 = args.symbol
+    symbol2 = args.symbol_2 or args.symbol  # 如果没指定就用第一个
     
     results = []
     
@@ -146,7 +149,7 @@ def main():
         logger.info("=" * 50)
         
         result2 = process_single_api(
-            api2_key, api2_secret, symbol, start_time, end_time,
+            api2_key, api2_secret, symbol2, start_time, end_time,
             rebate_rate, share_rate
         )
         results.append(("API 2", result2))
