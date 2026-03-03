@@ -21,3 +21,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated files
+order.md
+*.md (除 README 外)
