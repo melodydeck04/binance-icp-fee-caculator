@@ -97,9 +97,9 @@ class BinanceClient:
         if end_time:
             params["endTime"] = end_time
         
-        # 递归获取所有数据
+        # 递归获取所有数据 (需要签名)
         while True:
-            data = self._request("GET", "/api/v3/myTrades", params)
+            data = self._request("GET", "/api/v3/myTrades", params, signed=True)
             
             if not data:
                 break
