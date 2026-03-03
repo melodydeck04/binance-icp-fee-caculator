@@ -137,7 +137,7 @@ def main():
         logger.info("=" * 50)
         
         result1 = process_single_api(
-            api1_key, api1_secret, symbol, start_time, end_time,
+            api1_key, api1_secret, symbol1, start_time, end_time,
             rebate_rate, share_rate
         )
         results.append(("API 1", result1))
